@@ -1,11 +1,5 @@
-import {
-  type BaseCheckpointSaver,
-} from "@langchain/langgraph-checkpoint";
-import {
-  describe,
-  beforeAll,
-  afterAll,
-} from "@jest/globals";
+import { type BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
+import { describe, beforeAll, afterAll } from "@jest/globals";
 
 import { CheckpointSaverTestInitializer } from "../../types.js";
 import { putTests } from "./put.js";
@@ -35,4 +29,3 @@ export function specTest<T extends BaseCheckpointSaver>(
     getTupleTests(name, initializer);
   });
 }
-

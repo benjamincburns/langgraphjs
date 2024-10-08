@@ -20,15 +20,14 @@ export function putWritesTests<T extends BaseCheckpointSaver>(
     const thread_id = uuid6(-3);
     const checkpoint_id = uuid6(-3);
 
-      const baseConfig = {
-        configurable: {
-          thread_id,
+    const baseConfig = {
+      configurable: {
+        thread_id,
 
-          // this is here to make sure that the saver stores the whole config object, and not just the keys it knows about
-          some_random_key: "some_random_value",
-        },
-      };
-
+        // this is here to make sure that the saver stores the whole config object, and not just the keys it knows about
+        some_random_key: "some_random_value",
+      },
+    };
 
     beforeEach(async () => {
       initializerConfig = mergeConfigs(
@@ -42,13 +41,11 @@ export function putWritesTests<T extends BaseCheckpointSaver>(
       await initializer.destroySaver?.(saver, initializerConfig);
     });
 
-
     describe.each(["root", "child"])("namespace: %s", (namespace) => {
       const checkpoint_ns = namespace === "root" ? "" : namespace;
       let configArgument: RunnableConfig;
       let checkpoint: Checkpoint;
       let metadata: CheckpointMetadata | undefined;
-
 
       describe("success cases", () => {
         let returnedConfig!: RunnableConfig;
@@ -97,7 +94,8 @@ export function putWritesTests<T extends BaseCheckpointSaver>(
           expect(savedCheckpointTuple?.checkpoint).toEqual(checkpoint);
           expect(savedCheckpointTuple?.metadata).toEqual(metadata);
           expect(savedCheckpointTuple?.config).toEqual(
-            expect.objectContaining( // allow the saver to add additional fields to the config
+            expect.objectContaining(
+              // allow the saver to add additional fields to the config
               mergeConfigs(configArgument, { configurable: { checkpoint_id } })
             )
           );
