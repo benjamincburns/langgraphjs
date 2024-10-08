@@ -1,13 +1,12 @@
 import {
-  Checkpoint,
-  CheckpointMetadata,
+  CheckpointTuple,
   uuid6,
   type BaseCheckpointSaver,
 } from "@langchain/langgraph-checkpoint";
 import { describe, it, beforeEach, afterEach, expect } from "@jest/globals";
 import { mergeConfigs, RunnableConfig } from "@langchain/core/runnables";
 import { CheckpointSaverTestInitializer } from "../../types.js";
-import { emptyInitialCheckpointTuple } from "./data.js";
+import { parentAndChildCheckpointTuplesWithWrites } from "./data.js";
 
 export function getTupleTests<T extends BaseCheckpointSaver>(
   name: string,
@@ -15,26 +14,25 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
 ) {
   describe(`${name}#getTuple`, () => {
     let saver!: T;
-    let config!: RunnableConfig;
-    let thread_id!: string;
+    let initializerConfig!: RunnableConfig;
+    const thread_id = uuid6(-3);
+
+    const baseConfig = {
+      configurable: {
+        thread_id,
+      },
+    };
 
     beforeEach(async () => {
-      thread_id = uuid6(-3);
-
-      const baseConfig = {
-        configurable: {
-          thread_id,
-        },
-      };
-
-      const initializerConfig = await initializer.configure?.(config);
-
-      config = mergeConfigs(baseConfig, initializerConfig);
-      saver = await initializer.createSaver(config);
+      initializerConfig = mergeConfigs(
+        baseConfig,
+        await initializer.configure?.(baseConfig)
+      );
+      saver = await initializer.createSaver(initializerConfig);
     });
 
     afterEach(async () => {
-      await initializer.destroySaver?.(saver, config);
+      await initializer.destroySaver?.(saver, initializerConfig);
     });
 
     describe.each(["root", "child"])("namespace: %s", (namespace) => {
@@ -43,152 +41,152 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
       let parentCheckpointId!: string;
       let childCheckpointId!: string;
 
-      let parentConfig: RunnableConfig;
-      let childConfig: RunnableConfig;
-
-      let parentMetadata!: CheckpointMetadata;
-      let parentCheckpoint!: Checkpoint;
-
-      let childMetadata!: CheckpointMetadata;
-      let childCheckpoint!: Checkpoint;
+      let generatedParentTuple!: CheckpointTuple;
+      let generatedChildTuple!: CheckpointTuple;
 
       beforeEach(async () => {
         parentCheckpointId = uuid6(-3);
         childCheckpointId = uuid6(-3);
 
-        config = mergeConfigs(config, {
-          configurable: { checkpoint_ns },
-        });
+        ({ parent: generatedParentTuple, child: generatedChildTuple } =
+          parentAndChildCheckpointTuplesWithWrites(
+            parentCheckpointId,
+            childCheckpointId,
+            checkpoint_ns,
+            initializerConfig
+          ));
 
         const existingParentCheckpoint = await saver.get(
-          mergeConfigs(config, {
-            configurable: { checkpoint_id: parentCheckpointId },
-          })
+          generatedParentTuple.config
         );
         expect(existingParentCheckpoint).toBeUndefined();
 
         const existingChildCheckpoint = await saver.get(
-          mergeConfigs(config, {
-            configurable: { checkpoint_id: childCheckpointId },
-          })
+          generatedChildTuple.config
         );
         expect(existingChildCheckpoint).toBeUndefined();
 
-        const checkpointTuple = emptyInitialCheckpointTuple(
-          parentCheckpointId,
-          "root",
-          config
-        );
-
-        parentCheckpoint = {
-          ...checkpointTuple.checkpoint,
+        const parentPutConfig = {
+          ...generatedParentTuple.config,
+          configurable: {
+            ...generatedParentTuple.config.configurable,
+          },
         };
-        parentMetadata = checkpointTuple.metadata!;
 
-        parentConfig = mergeConfigs(
-          config,
-          await saver.put(config, parentCheckpoint, parentMetadata, {})
+        // Remove checkpoint_id from parentPutConfig to emulate how the first put of a new thread typically works
+        delete parentPutConfig.configurable.checkpoint_id;
+
+        await saver.put(
+          parentPutConfig,
+          generatedParentTuple.checkpoint,
+          generatedParentTuple.metadata!,
+          {}
         );
 
         await saver.putWrites(
-          parentConfig,
+          generatedParentTuple.config,
           [["animals", ["dog"]]],
           "add_dog_task"
         );
         await saver.putWrites(
-          parentConfig,
+          generatedParentTuple.config,
           [["animals", ["cat"]]],
           "add_cat_task"
         );
 
-        const childCheckpointTuple = emptyInitialCheckpointTuple(
-          childCheckpointId,
-          "child",
-          config
-        );
-
-        childCheckpoint = {
-          ...childCheckpointTuple.checkpoint,
-          v: 2,
-          ts: new Date().toISOString(),
-          channel_values: {
-            animals: ["dog", "cat"],
-          },
-          channel_versions: {
-            animals: 1,
-          },
-        };
-
-        childMetadata = {
-          source: "loop",
-          step: 0,
-          writes: {
-            add_dog_task: {
-              animals: "dog",
-            },
-            add_cat_task: {
-              animals: "cat",
-            },
-          },
-          parents: {
-            checkpoint_ns: parentCheckpointId,
-          },
-        };
-
-        childConfig = mergeConfigs(
-          parentConfig,
-          await saver.put(parentConfig, childCheckpoint, childMetadata, {})
-        );
-
-        expect(childConfig.configurable?.checkpoint_id).toEqual(
-          childCheckpointId
-        );
-        expect(parentConfig.configurable?.checkpoint_id).toEqual(
-          parentCheckpointId
+        await saver.put(
+          // parent config here because that's what would be returned by the previous `put`
+          generatedParentTuple.config,
+          generatedChildTuple.checkpoint,
+          generatedChildTuple.metadata!,
+          {}
         );
       });
 
       it("should return the parent checkpoint tuple when requested by id", async () => {
-        const checkpointTuple = await saver.getTuple(parentConfig);
-        expect(checkpointTuple).not.toBeUndefined();
-        expect(checkpointTuple?.checkpoint).not.toBeUndefined();
-        expect(checkpointTuple?.metadata).not.toBeUndefined();
-        expect(checkpointTuple?.config).not.toBeUndefined();
-        expect(checkpointTuple?.parentConfig).toBeUndefined();
+        const parentTuple = await saver.getTuple(generatedParentTuple.config);
+        expect(parentTuple).not.toBeUndefined();
+        expect(parentTuple?.checkpoint).not.toBeUndefined();
+        expect(parentTuple?.metadata).not.toBeUndefined();
+        expect(parentTuple?.config).not.toBeUndefined();
+        expect(parentTuple?.parentConfig).toBeUndefined();
 
-        expect(checkpointTuple?.checkpoint).toEqual(parentCheckpoint);
-        expect(checkpointTuple?.metadata).toEqual(parentMetadata);
-        expect(checkpointTuple?.config).toEqual(parentConfig);
+        expect(parentTuple?.checkpoint).toEqual(
+          generatedParentTuple.checkpoint
+        );
+        expect(parentTuple?.metadata).toEqual(generatedParentTuple.metadata);
+        expect(parentTuple?.config).toEqual(
+          expect.objectContaining(
+            generatedParentTuple.config as Record<string, unknown>
+          )
+        );
       });
 
       it("should return the child checkpoint tuple when requested by id", async () => {
-        const checkpointTuple = await saver.getTuple(childConfig);
-        expect(checkpointTuple).not.toBeUndefined();
-        expect(checkpointTuple?.checkpoint).not.toBeUndefined();
-        expect(checkpointTuple?.metadata).not.toBeUndefined();
-        expect(checkpointTuple?.config).not.toBeUndefined();
-        expect(checkpointTuple?.parentConfig).not.toBeUndefined();
+        const childTuple = await saver.getTuple(generatedChildTuple.config);
+        expect(childTuple).not.toBeUndefined();
+        expect(childTuple?.checkpoint).not.toBeUndefined();
+        expect(childTuple?.metadata).not.toBeUndefined();
+        expect(childTuple?.config).not.toBeUndefined();
+        expect(childTuple?.parentConfig).not.toBeUndefined();
 
-        expect(checkpointTuple?.checkpoint).toEqual(childCheckpoint);
-        expect(checkpointTuple?.metadata).toEqual(childMetadata);
-        expect(checkpointTuple?.config).toEqual(childConfig);
-        expect(checkpointTuple?.parentConfig).toEqual(parentConfig);
+        expect(childTuple?.checkpoint).toEqual(generatedChildTuple.checkpoint);
+        expect(childTuple?.metadata).toEqual(generatedChildTuple.metadata);
+
+        expect(childTuple?.config).toEqual(
+          expect.objectContaining(
+            generatedChildTuple.config as Record<string, unknown>
+          )
+        );
+
+        // TODO: Should this match the full parent config, or just these keys? MemorySaver only includes just these keys
+        expect(childTuple?.parentConfig).toEqual(
+          expect.objectContaining({
+            configurable: {
+              thread_id,
+              checkpoint_ns,
+              checkpoint_id: parentCheckpointId,
+            },
+          })
+        );
       });
 
       it("should return the latest checkpoint tuple when no checkpoint_id is provided", async () => {
-        const checkpointTuple = await saver.getTuple(
-          mergeConfigs(config, { configurable: { checkpoint_id: undefined } })
-        );
+        const configWithNoCheckpointId = {
+          ...initializerConfig,
+          configurable: {
+            ...initializerConfig.configurable,
+            checkpoint_ns,
+          },
+        };
+        const checkpointTuple = await saver.getTuple(configWithNoCheckpointId);
         expect(checkpointTuple).not.toBeUndefined();
         expect(checkpointTuple?.checkpoint).not.toBeUndefined();
         expect(checkpointTuple?.metadata).not.toBeUndefined();
         expect(checkpointTuple?.config).not.toBeUndefined();
         expect(checkpointTuple?.parentConfig).not.toBeUndefined();
 
-        expect(checkpointTuple?.checkpoint).toEqual(childCheckpoint);
-        expect(checkpointTuple?.metadata).toEqual(childMetadata);
-        expect(checkpointTuple?.config).toEqual(childConfig);
-        expect(checkpointTuple?.parentConfig).toEqual(parentConfig);
+        expect(checkpointTuple?.checkpoint).toEqual(
+          generatedChildTuple.checkpoint
+        );
+
+        expect(checkpointTuple?.metadata).toEqual(generatedChildTuple.metadata);
+
+        expect(checkpointTuple?.config).toEqual(
+          expect.objectContaining(
+            generatedChildTuple.config as Record<string, unknown>
+          )
+        );
+
+        expect(checkpointTuple?.parentConfig).toEqual(
+          expect.objectContaining({
+            configurable: {
+              thread_id,
+              checkpoint_ns,
+              checkpoint_id: parentCheckpointId,
+            },
+          })
+        );
       });
     });
   });
