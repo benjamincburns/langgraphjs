@@ -142,11 +142,14 @@ export function putTests<T extends BaseCheckpointSaver>(
 
       describe("failure cases", () => {
         it("should fail if the thread_id is missing", async () => {
-          const missingThreadIdConfig: RunnableConfig = mergeConfigs(
-            configArgument,
-            {}
-          );
-          delete missingThreadIdConfig.configurable?.thread_id;
+          const missingThreadIdConfig: RunnableConfig = {
+            ...configArgument,
+            configurable: Object.fromEntries(
+              Object.entries(configArgument.configurable ?? {}).filter(
+                ([key]) => key !== "thread_id"
+              )
+            ),
+          };
 
           await expect(
             async () =>
@@ -162,11 +165,14 @@ export function putTests<T extends BaseCheckpointSaver>(
     });
 
     it("should throw if the checkpoint namespace is missing from config.configurable", async () => {
-      const missingNamespaceConfig: RunnableConfig = mergeConfigs(
-        initializerConfig,
-        {}
-      );
-      delete missingNamespaceConfig.configurable?.checkpoint_ns;
+      const missingNamespaceConfig: RunnableConfig = {
+        ...initializerConfig,
+        configurable: Object.fromEntries(
+          Object.entries(initializerConfig.configurable ?? {}).filter(
+            ([key]) => key !== "checkpoint_ns"
+          )
+        ),
+      };
 
       const { checkpoint, metadata } = emptyInitialCheckpointTuple(
         checkpoint_id,

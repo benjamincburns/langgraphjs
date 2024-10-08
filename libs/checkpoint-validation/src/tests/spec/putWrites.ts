@@ -110,11 +110,14 @@ export function putWritesTests<T extends BaseCheckpointSaver>(
 
       describe("failure cases", () => {
         it("should fail if the thread_id is missing", async () => {
-          const missingThreadIdConfig: RunnableConfig = mergeConfigs(
-            configArgument,
-            {}
-          );
-          delete missingThreadIdConfig.configurable?.thread_id;
+          const missingThreadIdConfig: RunnableConfig = {
+            ...configArgument,
+            configurable: Object.fromEntries(
+              Object.entries(configArgument.configurable ?? {}).filter(
+                ([key]) => key !== "thread_id"
+              )
+            ),
+          };
 
           await expect(
             async () =>
@@ -127,11 +130,14 @@ export function putWritesTests<T extends BaseCheckpointSaver>(
         });
 
         it("should fail if the checkpoint_id is missing", async () => {
-          const missingCheckpointIdConfig: RunnableConfig = mergeConfigs(
-            configArgument,
-            {}
-          );
-          delete missingCheckpointIdConfig.configurable?.checkpoint_id;
+          const missingCheckpointIdConfig: RunnableConfig = {
+            ...configArgument,
+            configurable: Object.fromEntries(
+              Object.entries(configArgument.configurable ?? {}).filter(
+                ([key]) => key !== "checkpoint_id"
+              )
+            ),
+          };
 
           await expect(
             async () =>
