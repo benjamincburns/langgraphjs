@@ -9,24 +9,28 @@ import { describe, it, afterEach, beforeEach, expect } from "@jest/globals";
 import { mergeConfigs, RunnableConfig } from "@langchain/core/runnables";
 import { CheckpointSaverTestInitializer } from "../../types.js";
 import { emptyInitialCheckpointTuple } from "./data.js";
+import { skipOnModules } from "../utils.js";
 
 export function putTests<T extends BaseCheckpointSaver>(
   name: string,
   initializer: CheckpointSaverTestInitializer<T>
 ) {
   describe(`${name}#put`, () => {
-    let saver!: T;
-    let initializerConfig!: RunnableConfig;
-    const thread_id = uuid6(-3);
-    const checkpoint_id = uuid6(-3);
-
-    const baseConfig = {
-      configurable: {
-        thread_id,
-      },
-    };
+    let saver: T;
+    let initializerConfig: RunnableConfig;
+    let thread_id: string;
+    let checkpoint_id: string;
 
     beforeEach(async () => {
+      thread_id = uuid6(-3);
+      checkpoint_id = uuid6(-3);
+
+      const baseConfig = {
+        configurable: {
+          thread_id,
+        },
+      };
+
       initializerConfig = mergeConfigs(
         baseConfig,
         await initializer.configure?.(baseConfig)
@@ -129,7 +133,19 @@ export function putTests<T extends BaseCheckpointSaver>(
         });
 
         // TODO: this check fails for MemorySaver, is this an actual requirement of CheckpointSavers, or am I misunderstanding?
-        it.skip("should retain additional fields in the config", () => {
+        skipOnModules(
+          name,
+          {
+            moduleName: "MemorySaver",
+            skipReason:
+              "MemorySaver rebuilds configs in `getTuple` rather than storing them",
+          },
+          {
+            moduleName: "@langchain/langgraph-checkpoint-mongodb",
+            skipReason:
+              "MongoDBSaver does not store configs, only the checkpoint and metadata",
+          }
+        )("should retain additional fields in the config", () => {
           expect(savedCheckpointTuple?.config).toEqual(
             expect.objectContaining(
               mergeConfigs(configArgument, {
@@ -164,31 +180,38 @@ export function putTests<T extends BaseCheckpointSaver>(
       });
     });
 
-    it("should throw if the checkpoint namespace is missing from config.configurable", async () => {
-      const missingNamespaceConfig: RunnableConfig = {
-        ...initializerConfig,
-        configurable: Object.fromEntries(
-          Object.entries(initializerConfig.configurable ?? {}).filter(
-            ([key]) => key !== "checkpoint_ns"
-          )
-        ),
-      };
+    skipOnModules(name, {
+      moduleName: "@langchain/langgraph-checkpoint-mongodb",
+      skipReason:
+        "MongoDBSaver defaults to empty namespace when namespace is undefined",
+    })(
+      "should throw if the checkpoint namespace is missing from config.configurable",
+      async () => {
+        const missingNamespaceConfig: RunnableConfig = {
+          ...initializerConfig,
+          configurable: Object.fromEntries(
+            Object.entries(initializerConfig.configurable ?? {}).filter(
+              ([key]) => key !== "checkpoint_ns"
+            )
+          ),
+        };
 
-      const { checkpoint, metadata } = emptyInitialCheckpointTuple(
-        checkpoint_id,
-        "",
-        missingNamespaceConfig
-      );
+        const { checkpoint, metadata } = emptyInitialCheckpointTuple(
+          checkpoint_id,
+          "",
+          missingNamespaceConfig
+        );
 
-      await expect(
-        async () =>
-          await saver.put(
-            missingNamespaceConfig,
-            checkpoint,
-            metadata!,
-            {} /* not sure what to do about newVersions, as it's unused */
-          )
-      ).rejects.toThrow(); // no standard error type or message is thrown, so we just check that it throws
-    });
+        await expect(
+          async () =>
+            await saver.put(
+              missingNamespaceConfig,
+              checkpoint,
+              metadata!,
+              {} /* not sure what to do about newVersions, as it's unused */
+            )
+        ).rejects.toThrow(); // no standard error type or message is thrown, so we just check that it throws
+      }
+    );
   });
 }

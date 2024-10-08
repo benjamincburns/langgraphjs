@@ -8,6 +8,13 @@ export interface CheckpointSaverTestInitializer<T extends BaseCheckpointSaver> {
   beforeAll?(): void | Promise<void>;
 
   /**
+   * Optional timeout for beforeAll. Useful for test setups that might take a while to complete, e.g. due to needing to pull a docker container.
+   *
+   * @default 10000
+   */
+  beforeAllTimeout?: number;
+
+  /**
    * Called once after all tests are run. Use this to perform any cleanup that your checkpoint saver may require.
    */
   afterAll?(): void | Promise<void>;

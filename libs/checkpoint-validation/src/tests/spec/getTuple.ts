@@ -7,23 +7,24 @@ import { describe, it, beforeEach, afterEach, expect } from "@jest/globals";
 import { mergeConfigs, RunnableConfig } from "@langchain/core/runnables";
 import { CheckpointSaverTestInitializer } from "../../types.js";
 import { parentAndChildCheckpointTuplesWithWrites } from "./data.js";
+import { skipOnModules } from "../utils.js";
 
 export function getTupleTests<T extends BaseCheckpointSaver>(
   name: string,
   initializer: CheckpointSaverTestInitializer<T>
 ) {
   describe(`${name}#getTuple`, () => {
-    let saver!: T;
-    let initializerConfig!: RunnableConfig;
-    const thread_id = uuid6(-3);
-
-    const baseConfig = {
-      configurable: {
-        thread_id,
-      },
-    };
-
+    let saver: T;
+    let initializerConfig: RunnableConfig;
+    let thread_id: string;
     beforeEach(async () => {
+      thread_id = uuid6(-3);
+
+      const baseConfig = {
+        configurable: {
+          thread_id,
+        },
+      };
       initializerConfig = mergeConfigs(
         baseConfig,
         await initializer.configure?.(baseConfig)
@@ -209,7 +210,19 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
           expect(checkpointTuple).toBeUndefined();
         });
 
-        it("should throw if the thread_id is missing", async () => {
+        skipOnModules(
+          name,
+          {
+            moduleName: "@langchain/langgraph-checkpoint-mongodb",
+            skipReason:
+              "MongoDBSaver returns undefined if no `thread_id` is provided",
+          },
+          {
+            moduleName: "MemorySaver",
+            skipReason:
+              "MemorySaver returns undefined if no `thread_id` is provided",
+          }
+        )("should throw if the thread_id is missing", async () => {
           const missingThreadIdConfig: RunnableConfig = {
             ...initializerConfig,
             configurable: Object.fromEntries(

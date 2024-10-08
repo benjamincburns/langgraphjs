@@ -17,7 +17,7 @@ export function specTest<T extends BaseCheckpointSaver>(
 ) {
   beforeAll(async () => {
     await initializer.beforeAll?.();
-  });
+  }, initializer.beforeAllTimeout ?? 10000);
 
   afterAll(async () => {
     await initializer.afterAll?.();

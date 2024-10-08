@@ -15,21 +15,20 @@ export function putWritesTests<T extends BaseCheckpointSaver>(
   initializer: CheckpointSaverTestInitializer<T>
 ) {
   describe(`${name}#putWrites`, () => {
-    let saver!: T;
-    let initializerConfig!: RunnableConfig;
-    const thread_id = uuid6(-3);
-    const checkpoint_id = uuid6(-3);
-
-    const baseConfig = {
-      configurable: {
-        thread_id,
-
-        // this is here to make sure that the saver stores the whole config object, and not just the keys it knows about
-        some_random_key: "some_random_value",
-      },
-    };
+    let saver: T;
+    let initializerConfig: RunnableConfig;
+    let thread_id: string;
+    let checkpoint_id: string;
 
     beforeEach(async () => {
+      thread_id = uuid6(-3);
+      checkpoint_id = uuid6(-3);
+
+      const baseConfig = {
+        configurable: {
+          thread_id,
+        },
+      };
       initializerConfig = mergeConfigs(
         baseConfig,
         await initializer.configure?.(baseConfig)
