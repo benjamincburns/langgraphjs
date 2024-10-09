@@ -1,12 +1,14 @@
 import {
   CheckpointTuple,
+  TASKS,
   uuid6,
   type BaseCheckpointSaver,
 } from "@langchain/langgraph-checkpoint";
-import { describe, it, beforeEach, afterEach, expect } from "@jest/globals";
+import { describe, it, beforeAll, afterAll, expect } from "@jest/globals";
 import { mergeConfigs, RunnableConfig } from "@langchain/core/runnables";
 import { CheckpointSaverTestInitializer } from "../../types.js";
 import { parentAndChildCheckpointTuplesWithWrites } from "./data.js";
+import { it_skipForSomeModules } from "../utils.js";
 
 export function getTupleTests<T extends BaseCheckpointSaver>(
   name: string,
@@ -15,14 +17,10 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
   describe(`${name}#getTuple`, () => {
     let saver: T;
     let initializerConfig: RunnableConfig;
-    let thread_id: string;
-    beforeEach(async () => {
-      thread_id = uuid6(-3);
+    beforeAll(async () => {
 
       const baseConfig = {
-        configurable: {
-          thread_id,
-        },
+        configurable: { },
       };
       initializerConfig = mergeConfigs(
         baseConfig,
@@ -31,22 +29,30 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
       saver = await initializer.createSaver(initializerConfig);
     });
 
-    afterEach(async () => {
+    afterAll(async () => {
       await initializer.destroySaver?.(saver, initializerConfig);
     });
 
     describe.each(["root", "child"])("namespace: %s", (namespace) => {
+      let thread_id: string;
       const checkpoint_ns = namespace === "root" ? "" : namespace;
 
-      let parentCheckpointId!: string;
-      let childCheckpointId!: string;
+      let parentCheckpointId: string;
+      let childCheckpointId: string;
 
-      let generatedParentTuple!: CheckpointTuple;
-      let generatedChildTuple!: CheckpointTuple;
+      let generatedParentTuple: CheckpointTuple;
+      let generatedChildTuple: CheckpointTuple;
+      
+      let parentTuple: CheckpointTuple | undefined;
+      let childTuple: CheckpointTuple | undefined;
+      let latestTuple: CheckpointTuple | undefined;
 
-      beforeEach(async () => {
+      beforeAll(async () => {
+        thread_id = uuid6(-3);
         parentCheckpointId = uuid6(-3);
         childCheckpointId = uuid6(-3);
+
+        initializerConfig.configurable!.thread_id = thread_id;
 
         ({ parent: generatedParentTuple, child: generatedChildTuple } =
           parentAndChildCheckpointTuplesWithWrites(
@@ -88,10 +94,11 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
           [["animals", ["dog"]]],
           "add_dog_task"
         );
+
         await saver.putWrites(
           generatedParentTuple.config,
-          [["animals", ["cat"]]],
-          "add_cat_task"
+          [[TASKS, ["add_fish_task"]]],
+          "pending_sends_task"
         );
 
         await saver.put(
@@ -101,11 +108,26 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
           generatedChildTuple.metadata!,
           {}
         );
+
+        await saver.putWrites(
+          generatedChildTuple.config,
+          [["animals", ["fish"]]],
+          "add_fish_task"
+        );
+
+        await saver.putWrites(
+          generatedChildTuple.config,
+          [["animals", ["frog"]]],
+          "add_frog_task"
+        );
+
+        parentTuple = await saver.getTuple(generatedParentTuple.config);
+        childTuple = await saver.getTuple(generatedChildTuple.config);
+        latestTuple = await saver.getTuple(mergeConfigs(initializerConfig, { configurable: { checkpoint_ns } }));
       });
 
       describe("success cases", () => {
         it("should return the parent checkpoint tuple when requested by id", async () => {
-          const parentTuple = await saver.getTuple(generatedParentTuple.config);
           expect(parentTuple).not.toBeUndefined();
           expect(parentTuple?.checkpoint).not.toBeUndefined();
           expect(parentTuple?.metadata).not.toBeUndefined();
@@ -124,16 +146,13 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
         });
 
         it("should return the child checkpoint tuple when requested by id", async () => {
-          const childTuple = await saver.getTuple(generatedChildTuple.config);
+          childTuple = await saver.getTuple(generatedChildTuple.config);
           expect(childTuple).not.toBeUndefined();
           expect(childTuple?.checkpoint).not.toBeUndefined();
           expect(childTuple?.metadata).not.toBeUndefined();
           expect(childTuple?.config).not.toBeUndefined();
           expect(childTuple?.parentConfig).not.toBeUndefined();
 
-          expect(childTuple?.checkpoint).toEqual(
-            generatedChildTuple.checkpoint
-          );
           expect(childTuple?.metadata).toEqual(generatedChildTuple.metadata);
 
           expect(childTuple?.config).toEqual(
@@ -142,7 +161,6 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
             )
           );
 
-          // TODO: Should this match the full parent config, or just these keys? MemorySaver only includes just these keys
           expect(childTuple?.parentConfig).toEqual(
             expect.objectContaining({
               configurable: {
@@ -154,38 +172,40 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
           );
         });
 
-        it("should return the latest checkpoint tuple when no checkpoint_id is provided", async () => {
-          const configWithNoCheckpointId = mergeConfigs(initializerConfig, {
-            configurable: {
-              checkpoint_ns,
-            },
+        it_skipForSomeModules(name, {
+          "@langchain/langgraph-checkpoint-mongodb": "doesn't return pending_sends",
+          "@langchain/langgraph-checkpoint-sqlite": "doesn't return pending_sends",
+        })("should return the pending sends from the parent checkpoint", async () => {
+          expect(childTuple?.checkpoint).toEqual({
+            ...generatedChildTuple.checkpoint,
+            pending_sends: [["add_fish_task"]],
           });
+        });
 
-          const checkpointTuple = await saver.getTuple(
-            configWithNoCheckpointId
-          );
+        it_skipForSomeModules(name, {
+          "MemorySaver": "does return pending_sends"
+        })("should not return the pending sends from the parent checkpoint", async () => {
+          expect(childTuple?.checkpoint).toEqual(generatedChildTuple.checkpoint);
+        });
 
-          expect(checkpointTuple).not.toBeUndefined();
-          expect(checkpointTuple?.checkpoint).not.toBeUndefined();
-          expect(checkpointTuple?.metadata).not.toBeUndefined();
-          expect(checkpointTuple?.config).not.toBeUndefined();
-          expect(checkpointTuple?.parentConfig).not.toBeUndefined();
+        it("should return the latest checkpoint tuple when no checkpoint_id is provided", async () => {
+          expect(latestTuple).not.toBeUndefined();
+          expect(latestTuple?.checkpoint).not.toBeUndefined();
+          expect(latestTuple?.metadata).not.toBeUndefined();
+          expect(latestTuple?.config).not.toBeUndefined();
+          expect(latestTuple?.parentConfig).not.toBeUndefined();
 
-          expect(checkpointTuple?.checkpoint).toEqual(
-            generatedChildTuple.checkpoint
-          );
-
-          expect(checkpointTuple?.metadata).toEqual(
+          expect(latestTuple?.metadata).toEqual(
             generatedChildTuple.metadata
           );
 
-          expect(checkpointTuple?.config).toEqual(
+          expect(latestTuple?.config).toEqual(
             expect.objectContaining(
               generatedChildTuple.config as Record<string, unknown>
             )
           );
 
-          expect(checkpointTuple?.parentConfig).toEqual(
+          expect(latestTuple?.parentConfig).toEqual(
             expect.objectContaining({
               configurable: {
                 thread_id,
@@ -194,6 +214,22 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
               },
             })
           );
+        });
+        
+        it_skipForSomeModules(name, {
+          "@langchain/langgraph-checkpoint-mongodb": "doesn't return pending_sends",
+          "@langchain/langgraph-checkpoint-sqlite": "doesn't return pending_sends",
+        })("should return the pending writes from the latest checkpoint when fetched with no checkpoint_id", async () => {
+          expect(latestTuple?.checkpoint).toEqual({
+            ...generatedChildTuple.checkpoint,
+            pending_sends: [["add_fish_task"]],
+          });
+        });
+        
+        it_skipForSomeModules(name, {
+          "MemorySaver": "does return pending_sends"
+        })("should not return the pending writes from the latest checkpoint when fetched with no checkpoint_id", async () => {
+          expect(latestTuple?.checkpoint).toEqual(generatedChildTuple.checkpoint);
         });
       });
 
