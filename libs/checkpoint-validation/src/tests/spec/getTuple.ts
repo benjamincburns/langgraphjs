@@ -7,7 +7,6 @@ import { describe, it, beforeEach, afterEach, expect } from "@jest/globals";
 import { mergeConfigs, RunnableConfig } from "@langchain/core/runnables";
 import { CheckpointSaverTestInitializer } from "../../types.js";
 import { parentAndChildCheckpointTuplesWithWrites } from "./data.js";
-import { skipOnModules } from "../utils.js";
 
 export function getTupleTests<T extends BaseCheckpointSaver>(
   name: string,
@@ -210,19 +209,8 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
           expect(checkpointTuple).toBeUndefined();
         });
 
-        skipOnModules(
-          name,
-          {
-            moduleName: "@langchain/langgraph-checkpoint-mongodb",
-            skipReason:
-              "MongoDBSaver returns undefined if no `thread_id` is provided",
-          },
-          {
-            moduleName: "MemorySaver",
-            skipReason:
-              "MemorySaver returns undefined if no `thread_id` is provided",
-          }
-        )("should throw if the thread_id is missing", async () => {
+        // tagged "[compatibility]" because this is how the other implementations behave, however it seems unlikely that this is a valid precondition for a call to `getTuple`
+        it("[compatibility] should return undefined if the thread_id is missing", async () => {
           const missingThreadIdConfig: RunnableConfig = {
             ...initializerConfig,
             configurable: Object.fromEntries(
@@ -232,9 +220,7 @@ export function getTupleTests<T extends BaseCheckpointSaver>(
             ),
           };
 
-          await expect(
-            async () => await saver.getTuple(missingThreadIdConfig)
-          ).rejects.toThrow();
+          expect(await saver.getTuple(missingThreadIdConfig)).toBeUndefined();
         });
       });
     });

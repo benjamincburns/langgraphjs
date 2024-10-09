@@ -9,7 +9,7 @@ import { describe, it, afterEach, beforeEach, expect } from "@jest/globals";
 import { mergeConfigs, RunnableConfig } from "@langchain/core/runnables";
 import { CheckpointSaverTestInitializer } from "../../types.js";
 import { emptyInitialCheckpointTuple } from "./data.js";
-import { skipOnModules } from "../utils.js";
+import { it_skipForSomeModules } from "../utils.js";
 
 export function putTests<T extends BaseCheckpointSaver>(
   name: string,
@@ -19,11 +19,15 @@ export function putTests<T extends BaseCheckpointSaver>(
     let saver: T;
     let initializerConfig: RunnableConfig;
     let thread_id: string;
-    let checkpoint_id: string;
+    let checkpoint_id1: string;
+    let checkpoint_id2: string;
+    let invalid_checkpoint_id: string;
 
     beforeEach(async () => {
       thread_id = uuid6(-3);
-      checkpoint_id = uuid6(-3);
+      checkpoint_id1 = uuid6(-3);
+      checkpoint_id2 = uuid6(-3);
+      invalid_checkpoint_id = uuid6(-3);
 
       const baseConfig = {
         configurable: {
@@ -45,16 +49,32 @@ export function putTests<T extends BaseCheckpointSaver>(
     describe.each(["root", "child"])("namespace: %s", (namespace) => {
       const checkpoint_ns = namespace === "root" ? "" : namespace;
       let configArgument: RunnableConfig;
-      let checkpoint: Checkpoint;
-      let metadata: CheckpointMetadata | undefined;
+      let checkpointStoredWithoutIdInConfig: Checkpoint;
+      let metadataStoredWithoutIdInConfig: CheckpointMetadata | undefined;
+      let checkpointStoredWithIdInConfig: Checkpoint;
+      let metadataStoredWithIdInConfig: CheckpointMetadata | undefined;
 
       describe("success cases", () => {
-        let returnedConfig!: RunnableConfig;
-        let savedCheckpointTuple: CheckpointTuple | undefined;
+        let returnedConfig1: RunnableConfig;
+        let returnedConfig2: RunnableConfig;
+        let savedCheckpointTuple1: CheckpointTuple | undefined;
+        let savedCheckpointTuple2: CheckpointTuple | undefined;
 
         beforeEach(async () => {
-          ({ checkpoint, metadata } = emptyInitialCheckpointTuple(
-            checkpoint_id,
+          ({
+            checkpoint: checkpointStoredWithoutIdInConfig,
+            metadata: metadataStoredWithoutIdInConfig,
+          } = emptyInitialCheckpointTuple(
+            checkpoint_id1,
+            checkpoint_ns,
+            initializerConfig
+          ));
+
+          ({
+            checkpoint: checkpointStoredWithIdInConfig,
+            metadata: metadataStoredWithIdInConfig,
+          } = emptyInitialCheckpointTuple(
+            checkpoint_id2,
             checkpoint_ns,
             initializerConfig
           ));
@@ -63,95 +83,107 @@ export function putTests<T extends BaseCheckpointSaver>(
             configurable: { checkpoint_ns },
           });
 
-          // ensure the test checkpoint does not already exist
-          const existingCheckpoint = await saver.get(
+          // validate assumptions - the test checkpoints must not already exist
+          const existingCheckpoint1 = await saver.get(
             mergeConfigs(configArgument, {
               configurable: {
-                checkpoint_id,
+                checkpoint_id: checkpoint_id1,
               },
             })
           );
-          expect(existingCheckpoint).toBeUndefined(); // our test checkpoint should not exist yet
 
-          returnedConfig = await saver.put(
+          const existingCheckpoint2 = await saver.get(
             mergeConfigs(configArgument, {
               configurable: {
-                // add an field to the config at put time to ensure that the saver persists config as a (mostly) opaque object
+                checkpoint_id: checkpoint_id1,
+              },
+            })
+          );
+
+          expect(existingCheckpoint1).toBeUndefined();
+          expect(existingCheckpoint2).toBeUndefined();
+
+          // set up
+          // call put without the `checkpoint_id` in the config
+          returnedConfig1 = await saver.put(
+            mergeConfigs(configArgument, {
+              // Add an field to the config at put time to see whether or not the saver persists it. Note that we don't
+              // add this into `configArgument` directly because we don't want to pass it to `getTuple` when we fetch
+              // the checkpoint to validate what was stored. If we were to pass it to `getTuple` and the field was
+              // present in the stored tuple's config, we wouldn't know whether the field was there because it was
+              // persisted during the call to `put`, or because it was added to the config on the `put` call.
+              configurable: {
                 canary: "tweet",
               },
             }),
 
-            checkpoint,
-            metadata!,
-            {} /* not sure what to do about newVersions, as it's unused */
+            checkpointStoredWithoutIdInConfig,
+            metadataStoredWithoutIdInConfig!,
+            {} /* not sure what to do about newVersions, as it's apparently unused */
           );
 
-          savedCheckpointTuple = await saver.getTuple(
-            mergeConfigs(configArgument, returnedConfig)
+          // call put with a different `checkpoint_id` in the config to ensure that it treats the `id` field in the `Checkpoint` as
+          // the authoritative identifier, rather than the `checkpoint_id` in the config
+          returnedConfig2 = await saver.put(
+            mergeConfigs(configArgument, {
+              configurable: {
+                checkpoint_id: invalid_checkpoint_id,
+              },
+            }),
+            checkpointStoredWithIdInConfig,
+            metadataStoredWithIdInConfig!,
+            {}
+          );
+
+          savedCheckpointTuple1 = await saver.getTuple(
+            mergeConfigs(configArgument, returnedConfig1)
+          );
+
+          savedCheckpointTuple2 = await saver.getTuple(
+            mergeConfigs(configArgument, returnedConfig2)
           );
         });
 
         it("should return a config with a 'configurable' property", () => {
-          expect(returnedConfig.configurable).toBeDefined();
+          expect(returnedConfig1.configurable).toBeDefined();
         });
 
         it("should return config with matching thread_id", () => {
-          expect(returnedConfig.configurable?.thread_id).toEqual(thread_id);
+          expect(returnedConfig1.configurable?.thread_id).toEqual(thread_id);
         });
 
         it("should return config with matching checkpoint_id", () => {
-          expect(returnedConfig.configurable?.checkpoint_id).toEqual(
-            checkpoint.id
+          expect(returnedConfig1.configurable?.checkpoint_id).toEqual(
+            checkpointStoredWithoutIdInConfig.id
           );
+          expect(returnedConfig2.configurable?.checkpoint_id).toEqual(
+            checkpointStoredWithIdInConfig.id
+          );
+        });
+        
+        it("should return a checkpoint with a new id when the id in the config on put is invalid", () => {
+          expect(savedCheckpointTuple2?.checkpoint.id).not.toEqual(invalid_checkpoint_id);
         });
 
         it("should return config with matching checkpoint_ns", () => {
-          expect(returnedConfig.configurable?.checkpoint_ns).toEqual(
+          expect(returnedConfig1.configurable?.checkpoint_ns).toEqual(
             checkpoint_ns
           );
         });
 
         it("should result in a retrievable checkpoint tuple", () => {
-          expect(savedCheckpointTuple).not.toBeUndefined();
+          expect(savedCheckpointTuple1).not.toBeUndefined();
         });
 
         it("should store the checkpoint without alteration", () => {
-          expect(savedCheckpointTuple?.checkpoint).toEqual(checkpoint);
-        });
-
-        it("should store the metadata without alteration", () => {
-          expect(savedCheckpointTuple?.metadata).toEqual(metadata);
-        });
-
-        it("should store the config argument with an additional `checkpoint_id` property (extra fields allowed)", () => {
-          expect(savedCheckpointTuple?.config).toEqual(
-            expect.objectContaining(
-              // allow the saver to add additional fields to the config
-              mergeConfigs(configArgument, { configurable: { checkpoint_id } })
-            )
+          expect(savedCheckpointTuple1?.checkpoint).toEqual(
+            checkpointStoredWithoutIdInConfig
           );
         });
 
-        // TODO: this check fails for MemorySaver, is this an actual requirement of CheckpointSavers, or am I misunderstanding?
-        skipOnModules(
-          name,
-          {
-            moduleName: "MemorySaver",
-            skipReason:
-              "MemorySaver rebuilds configs in `getTuple` rather than storing them",
-          },
-          {
-            moduleName: "@langchain/langgraph-checkpoint-mongodb",
-            skipReason:
-              "MongoDBSaver does not store configs, only the checkpoint and metadata",
-          }
-        )("should retain additional fields in the config", () => {
-          expect(savedCheckpointTuple?.config).toEqual(
-            expect.objectContaining(
-              mergeConfigs(configArgument, {
-                configurable: { checkpoint_id, canary: "tweet" },
-              })
-            )
+        it("should store the metadata without alteration", () => {
+          expect(savedCheckpointTuple1?.metadata).toEqual(
+            metadataStoredWithoutIdInConfig
           );
         });
       });
@@ -171,8 +203,8 @@ export function putTests<T extends BaseCheckpointSaver>(
             async () =>
               await saver.put(
                 missingThreadIdConfig,
-                checkpoint,
-                metadata!,
+                checkpointStoredWithoutIdInConfig,
+                metadataStoredWithoutIdInConfig!,
                 {} /* not sure what to do about newVersions, as it's unused */
               )
           ).rejects.toThrow();
@@ -180,9 +212,8 @@ export function putTests<T extends BaseCheckpointSaver>(
       });
     });
 
-    skipOnModules(name, {
-      moduleName: "@langchain/langgraph-checkpoint-mongodb",
-      skipReason:
+    it_skipForSomeModules(name, {
+      "@langchain/langgraph-checkpoint-mongodb":
         "MongoDBSaver defaults to empty namespace when namespace is undefined",
     })(
       "should throw if the checkpoint namespace is missing from config.configurable",
@@ -197,7 +228,7 @@ export function putTests<T extends BaseCheckpointSaver>(
         };
 
         const { checkpoint, metadata } = emptyInitialCheckpointTuple(
-          checkpoint_id,
+          checkpoint_id1,
           "",
           missingNamespaceConfig
         );

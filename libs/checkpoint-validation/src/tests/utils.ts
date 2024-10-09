@@ -1,25 +1,30 @@
 import { it } from "@jest/globals";
 
-export type SkippedModule = {
-  moduleName: string;
-  skipReason: string;
-};
+// to make the type signature of the skipOnModules function a bit more readable
+export type SaverName = string;
+export type WhySkipped = string;
 
-export function skipOnModules(
-  moduleName: string,
-  ...modules: SkippedModule[]
+/**
+ * Conditionally skips a test for a specific checkpoint saver implementation. When the test is skipped,
+ * the reason for skipping is provided.
+ *
+ * @param saverName - The name of the current module being tested (as passed via the `name` argument in the top-level suite entrypoint).
+ * @param skippedSavers - A list of modules for which the test should be skipped.
+ * @returns A function that can be used in place of the Jest @see it function and conditionally skips the test for the provided module.
+ */
+export function it_skipForSomeModules(
+  saverName: string,
+  skippedSavers: Record<SaverName, WhySkipped>
 ): typeof it | typeof it.skip {
-  const skippedModule = modules.find(
-    (module) => module.moduleName === moduleName
-  );
+  const skipReason = skippedSavers[saverName];
 
-  if (skippedModule) {
+  if (skipReason) {
     const skip = (
       name: string,
       test: () => void | Promise<void>,
       timeout?: number
     ) => {
-      it.skip(`[because ${skippedModule.skipReason}] ${name}`, test);
+      it.skip(`[because ${skipReason}] ${name}`, test, timeout);
     };
     skip.prototype = it.skip.prototype;
     return skip as typeof it.skip;
