@@ -19,7 +19,7 @@ let startedContainer: StartedMongoDBContainer;
 let client: MongoClient | undefined;
 
 const initializer: CheckpointSaverTestInitializer<MongoDBSaver> = {
-  beforeAll: async () => {
+  async beforeAll() {
     startedContainer = await container.start();
     const connectionString = `mongodb://127.0.0.1:${startedContainer.getMappedPort(
       27017
@@ -29,12 +29,18 @@ const initializer: CheckpointSaverTestInitializer<MongoDBSaver> = {
 
   beforeAllTimeout: 300_000, // five minutes, to pull docker container
 
-  createSaver: () =>
-    new MongoDBSaver({
-      client: client!,
-    }),
+  async createSaver() {
+    // ensure fresh database for each test
+    const db = await client!.db(dbName);
+    await db.dropDatabase();
+    await client!.db(dbName);
 
-  afterAll: async () => {
+    return new MongoDBSaver({
+      client: client!,
+    });
+  },
+
+  async afterAll() {
     await client?.close();
     await startedContainer.stop();
   },

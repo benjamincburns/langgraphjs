@@ -5,6 +5,7 @@ import { CheckpointSaverTestInitializer } from "../../types.js";
 import { putTests } from "./put.js";
 import { putWritesTests } from "./putWrites.js";
 import { getTupleTests } from "./getTuple.js";
+import { listTests } from "./list.js";
 
 /**
  * Kicks off a test suite to validate that the provided checkpoint saver conforms to the specification for classes that extend @see BaseCheckpointSaver.
@@ -27,5 +28,6 @@ export function specTest<T extends BaseCheckpointSaver>(
     putTests(name, initializer);
     putWritesTests(name, initializer);
     getTupleTests(name, initializer);
+    listTests(name, initializer);
   });
 }

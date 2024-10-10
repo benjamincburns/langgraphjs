@@ -32,3 +32,29 @@ export function it_skipForSomeModules(
 
   return it;
 }
+
+export function it_skipIfNot(
+  saverName: string,
+  ...savers: SaverName[]
+): typeof it | typeof it.skip {
+
+  if (!savers.includes(saverName)) {
+    const skip = (
+      name: string,
+      test: () => void | Promise<void>,
+      timeout?: number
+    ) => {
+      it.skip(
+        `[only passes for "${savers.join('", "')}"] ${name}`,
+        test,
+        timeout
+      );
+    };
+    skip.prototype = it.skip.prototype;
+    return skip as typeof it.skip;
+  }
+
+  return it;
+}
+  
+  
