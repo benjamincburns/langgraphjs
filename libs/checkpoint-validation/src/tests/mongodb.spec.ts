@@ -46,5 +46,5 @@ const initializer: CheckpointSaverTestInitializer<MongoDBSaver> = {
   },
 };
 
-// scenarioTest("MemorySaver", initializer);
+// scenarioTest("@langchain/langgraph-checkpoint-mongodb", initializer);
 specTest("@langchain/langgraph-checkpoint-mongodb", initializer);

@@ -1782,15 +1782,18 @@ __metadata:
     "@jest/globals": ^29.5.0
     "@langchain/langgraph-checkpoint": "workspace:*"
     "@langchain/langgraph-checkpoint-mongodb": "workspace:*"
+    "@langchain/langgraph-checkpoint-postgres": "workspace:*"
     "@langchain/langgraph-checkpoint-sqlite": "workspace:*"
     "@langchain/scripts": ">=0.1.3 <0.2.0"
     "@swc/core": ^1.3.90
     "@swc/jest": ^0.2.29
     "@testcontainers/mongodb": ^10.13.2
+    "@testcontainers/postgresql": ^10.13.2
     "@tsconfig/recommended": ^1.0.3
     "@types/uuid": ^10
     "@typescript-eslint/eslint-plugin": ^6.12.0
     "@typescript-eslint/parser": ^6.12.0
+    better-sqlite3: ^9.5.0
     dotenv: ^16.3.1
     dpdm: ^3.12.0
     eslint: ^8.33.0
@@ -1803,6 +1806,7 @@ __metadata:
     jest: ^29.5.0
     jest-environment-node: ^29.6.4
     mongodb: ^6.8.0
+    pg: ^8.12.0
     prettier: ^2.8.3
     release-it: ^17.6.0
     rollup: ^4.22.4
@@ -2852,6 +2856,15 @@ __metadata:
   dependencies:
     testcontainers: ^10.13.2
   checksum: 6440db8aaaddb6b73b8db0ba9e4aedc4a508fef65573e03eba355e88cf51799c4b96269f66a1f37b0b5f3185e4708d33f9d9b810e87675f89adc6f0c78509227
+  languageName: node
+  linkType: hard
+
+"@testcontainers/postgresql@npm:^10.13.2":
+  version: 10.13.2
+  resolution: "@testcontainers/postgresql@npm:10.13.2"
+  dependencies:
+    testcontainers: ^10.13.2
+  checksum: 444b863f2a92a591f1658e8bb7d4d934ce6f31dda3cb37dbaa004b28cdb7830f8e77f85e7a8ad27ff035a24f3d70d90294818e6910fa400c4fc21db2e31f76f5
   languageName: node
   linkType: hard
 

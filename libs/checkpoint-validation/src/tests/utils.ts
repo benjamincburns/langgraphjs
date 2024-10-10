@@ -37,7 +37,6 @@ export function it_skipIfNot(
   saverName: string,
   ...savers: SaverName[]
 ): typeof it | typeof it.skip {
-
   if (!savers.includes(saverName)) {
     const skip = (
       name: string,
@@ -56,5 +55,3 @@ export function it_skipIfNot(
 
   return it;
 }
-  
-  

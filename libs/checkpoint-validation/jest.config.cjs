@@ -9,6 +9,7 @@ module.exports = {
   collectCoverageFrom: [
     "<rootDir>/libs/checkpoint/src/memory.ts",
     "<rootDir>/libs/checkpoint-mongodb/src/index.ts",
+    "<rootDir>/libs/checkpoint-postgres/src/index.ts",
     "<rootDir>/libs/checkpoint-sqlite/src/index.ts",
   ],
   

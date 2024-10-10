@@ -160,9 +160,11 @@ export function putTests<T extends BaseCheckpointSaver>(
             checkpointStoredWithIdInConfig.id
           );
         });
-        
+
         it("should return a checkpoint with a new id when the id in the config on put is invalid", () => {
-          expect(savedCheckpointTuple2?.checkpoint.id).not.toEqual(invalid_checkpoint_id);
+          expect(savedCheckpointTuple2?.checkpoint.id).not.toEqual(
+            invalid_checkpoint_id
+          );
         });
 
         it("should return config with matching checkpoint_ns", () => {
@@ -215,6 +217,8 @@ export function putTests<T extends BaseCheckpointSaver>(
     it_skipForSomeModules(name, {
       "@langchain/langgraph-checkpoint-mongodb":
         "MongoDBSaver defaults to empty namespace when namespace is undefined",
+      "@langchain/langgraph-checkpoint-sqlite":
+        "SqliteSaver defaults to default namespace when namespace is undefined",
     })(
       "should throw if the checkpoint namespace is missing from config.configurable",
       async () => {
