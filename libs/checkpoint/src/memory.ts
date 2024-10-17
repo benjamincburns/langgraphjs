@@ -171,14 +171,16 @@ export class MemorySaver extends BaseCheckpointSaver {
     options?: CheckpointListOptions
   ): AsyncGenerator<CheckpointTuple> {
     // eslint-disable-next-line prefer-const
-    let { before, limit } = options ?? {};
+    let { before, limit, filter } = options ?? {};
     const threadIds = config.configurable?.thread_id
       ? [config.configurable?.thread_id]
       : Object.keys(this.storage);
     const configCheckpointNamespace = config.configurable?.checkpoint_ns;
 
     for (const threadId of threadIds) {
-      for (const checkpointNamespace of Object.keys(this.storage[threadId])) {
+      for (const checkpointNamespace of Object.keys(
+        this.storage[threadId] ?? {}
+      )) {
         if (
           configCheckpointNamespace !== undefined &&
           checkpointNamespace !== configCheckpointNamespace
@@ -208,6 +210,16 @@ export class MemorySaver extends BaseCheckpointSaver {
             "json",
             metadataStr
           )) as CheckpointMetadata;
+
+          if (
+            filter &&
+            !Object.entries(filter).every(
+              ([key, value]) =>
+                (metadata as unknown as Record<string, unknown>)[key] === value
+            )
+          ) {
+            continue;
+          }
 
           // Limit search results
           if (limit !== undefined) {

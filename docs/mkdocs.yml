@@ -104,6 +104,7 @@ nav:
           - Create map-reduce branches for parallel execution: "how-tos/map-reduce.ipynb"
       - Persistence:
           - Add thread-level persistence: how-tos/persistence.ipynb
+          - Add thread-level persistence to subgraphs: how-tos/subgraph-persistence.ipynb
           - Add cross-thread persistence: how-tos/cross-thread-persistence.ipynb
           - Use a Postgres checkpointer for persistence: how-tos/persistence-postgres.ipynb
           - View and update past graph state: "how-tos/time-travel.ipynb"
@@ -131,8 +132,8 @@ nav:
           - Force an agent to call a tool: "how-tos/force-calling-a-tool-first.ipynb"
           - Pass runtime values to tools: "how-tos/pass-run-time-values-to-tools.ipynb"
       - Subgraphs:
-          - Create subgraphs: how-tos/subgraph.ipynb
-          - Manage state in subgraphs: how-tos/subgraphs-manage-state.ipynb
+          - Add and use subgraphs: how-tos/subgraph.ipynb
+          - View and update state in subgraphs: how-tos/subgraphs-manage-state.ipynb
           - Transform inputs and outputs of a subgraph: how-tos/subgraph-transform-state.ipynb
       - State management:
           - Have a separate input and output schema: "how-tos/input_output_schema.ipynb"
@@ -150,6 +151,12 @@ nav:
           - Have agent respond in structured format: "how-tos/respond-in-format.ipynb"
           - Manage agent steps: "how-tos/managing-agent-steps.ipynb"
           - Add node retry policies: "how-tos/node-retry-policies.ipynb"
+          - Error reference:
+              - "troubleshooting/errors/index.md"
+              - GRAPH_RECURSION_LIMIT: "troubleshooting/errors/GRAPH_RECURSION_LIMIT.ipynb"
+              - INVALID_CONCURRENT_GRAPH_UPDATE: "troubleshooting/errors/INVALID_CONCURRENT_GRAPH_UPDATE.ipynb"
+              - INVALID_GRAPH_NODE_RETURN_VALUE: "troubleshooting/errors/INVALID_GRAPH_NODE_RETURN_VALUE.ipynb"
+              - MULTIPLE_SUBGRAPHS: "troubleshooting/errors/MULTIPLE_SUBGRAPHS.ipynb"
   - "Conceptual Guides":
       - Why LangGraph?: concepts/high_level.md
       - LangGraph Glossary: concepts/low_level.md
