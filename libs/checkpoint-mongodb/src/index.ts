@@ -10,6 +10,10 @@ import {
   type CheckpointMetadata,
   CheckpointPendingWrite,
 } from "@langchain/langgraph-checkpoint";
+import { applyMigrations, needsMigration } from "./migrations/index.js";
+
+// increment this whenever the structure of the database changes in a way that would require a migration
+const CURRENT_SCHEMA_VERSION = 1;
 
 export type MongoDBSaverParams = {
   client: MongoClient;
@@ -30,6 +34,10 @@ export class MongoDBSaver extends BaseCheckpointSaver {
 
   checkpointWritesCollectionName = "checkpoint_writes";
 
+  protected schemaVersionCollectionName = "schema_version";
+
+  private isSetup = false;
+
   constructor(
     {
       client,
@@ -46,6 +54,84 @@ export class MongoDBSaver extends BaseCheckpointSaver {
       checkpointCollectionName ?? this.checkpointCollectionName;
     this.checkpointWritesCollectionName =
       checkpointWritesCollectionName ?? this.checkpointWritesCollectionName;
+    this.isSetup = false;
+  }
+
+  /**
+   * Runs async setup tasks if they haven't been run yet.
+   */
+  async setup(): Promise<void> {
+    if (this.isSetup) {
+      return;
+    }
+    await this.initializeSchemaVersion();
+    this.isSetup = true;
+  }
+
+  private async initializeSchemaVersion(): Promise<void> {
+    const schemaVersionCollection = this.db.collection(
+      this.schemaVersionCollectionName
+    );
+
+    const dbNeedsMigration = await needsMigration(
+      this.client,
+      this.db.databaseName,
+      this.checkpointCollectionName,
+      this.checkpointWritesCollectionName,
+      this.schemaVersionCollectionName,
+      this.serde
+    );
+
+    if (dbNeedsMigration) {
+      throw new Error(
+        `Database needs migration. Call the migrate() method to migrate the database.`
+      );
+    }
+
+    const versionDoc = await schemaVersionCollection.findOne({});
+
+    // empty database
+    if (!versionDoc) {
+      await schemaVersionCollection.updateOne(
+        {},
+        { $set: { version: CURRENT_SCHEMA_VERSION } },
+        { upsert: true }
+      );
+    } else if (versionDoc.version > CURRENT_SCHEMA_VERSION) {
+      throw new Error(
+        `Database created with newer version of checkpoint-mongodb. This version supports schema version ` +
+          `${CURRENT_SCHEMA_VERSION} but the database was created with schema version ${versionDoc.version}.`
+      );
+    } else if (versionDoc.version < CURRENT_SCHEMA_VERSION) {
+      throw new Error(
+        `BUG: Schema version ${versionDoc.version} is outdated (should be >= ${CURRENT_SCHEMA_VERSION}), but no ` +
+          `migration wants to execute.`
+      );
+    }
+  }
+
+  async migrate() {
+    if (
+      !(await needsMigration(
+        this.client,
+        this.db.databaseName,
+        this.checkpointCollectionName,
+        this.checkpointWritesCollectionName,
+        this.schemaVersionCollectionName,
+        this.serde
+      ))
+    ) {
+      return;
+    }
+
+    await applyMigrations(
+      this.client,
+      this.db.databaseName,
+      this.checkpointCollectionName,
+      this.checkpointWritesCollectionName,
+      this.schemaVersionCollectionName,
+      this.serde
+    );
   }
 
   /**
@@ -55,6 +141,8 @@ export class MongoDBSaver extends BaseCheckpointSaver {
    * for the given thread ID is retrieved.
    */
   async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
+    await this.setup();
+
     const {
       thread_id,
       checkpoint_ns = "",
@@ -135,6 +223,8 @@ export class MongoDBSaver extends BaseCheckpointSaver {
     config: RunnableConfig,
     options?: CheckpointListOptions
   ): AsyncGenerator<CheckpointTuple> {
+    await this.setup();
+
     const { limit, before, filter } = options ?? {};
     const query: Record<string, unknown> = {};
 
@@ -210,6 +300,8 @@ export class MongoDBSaver extends BaseCheckpointSaver {
     checkpoint: Checkpoint,
     metadata: CheckpointMetadata
   ): Promise<RunnableConfig> {
+    await this.setup();
+
     const thread_id = config.configurable?.thread_id;
     const checkpoint_ns = config.configurable?.checkpoint_ns ?? "";
     const checkpoint_id = checkpoint.id;
@@ -259,6 +351,8 @@ export class MongoDBSaver extends BaseCheckpointSaver {
     writes: PendingWrite[],
     taskId: string
   ): Promise<void> {
+    await this.setup();
+
     const thread_id = config.configurable?.thread_id;
     const checkpoint_ns = config.configurable?.checkpoint_ns;
     const checkpoint_id = config.configurable?.checkpoint_id;
