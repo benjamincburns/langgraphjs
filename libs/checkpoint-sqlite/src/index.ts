@@ -10,7 +10,9 @@ import {
   type CheckpointMetadata,
   TASKS,
   copyCheckpoint,
+  ChannelVersions,
 } from "@langchain/langgraph-checkpoint";
+import { MIGRATIONS } from "./migrations.js";
 
 interface CheckpointRow {
   checkpoint: string;
@@ -22,6 +24,7 @@ interface CheckpointRow {
   type?: string;
   pending_writes: string;
   pending_sends: string;
+  channel_values: string;
 }
 
 interface PendingWriteColumn {
@@ -83,32 +86,47 @@ export class SqliteSaver extends BaseCheckpointSaver {
       return;
     }
 
-    this.db.pragma("journal_mode=WAL");
-    this.db.exec(`
-CREATE TABLE IF NOT EXISTS checkpoints (
-  thread_id TEXT NOT NULL,
-  checkpoint_ns TEXT NOT NULL DEFAULT '',
-  checkpoint_id TEXT NOT NULL,
-  parent_checkpoint_id TEXT,
-  type TEXT,
-  checkpoint BLOB,
-  metadata BLOB,
-  PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
-);`);
-    this.db.exec(`
-CREATE TABLE IF NOT EXISTS writes (
-  thread_id TEXT NOT NULL,
-  checkpoint_ns TEXT NOT NULL DEFAULT '',
-  checkpoint_id TEXT NOT NULL,
-  task_id TEXT NOT NULL,
-  idx INTEGER NOT NULL,
-  channel TEXT NOT NULL,
-  type TEXT,
-  value BLOB,
-  PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
-);`);
+    this.migrate();
 
     this.isSetup = true;
+  }
+
+  migrate(stopAtVersion?: number) {
+    let version = -1;
+
+    try {
+      const row = this.db
+        .prepare("SELECT v FROM checkpoint_migrations ORDER BY v DESC LIMIT 1")
+        .get() as { v: number };
+      if (row !== undefined) {
+        version = row.v;
+      }
+    } catch (error: unknown) {
+      // Assume table doesn't exist if there's an error
+      if (
+        (error as Error).message.includes(
+          "no such table: checkpoint_migrations"
+        )
+      ) {
+        version = -1;
+      } else {
+        throw error;
+      }
+    }
+
+    version += 1;
+
+    for (const migration of MIGRATIONS.slice(version)) {
+      this.db.exec(migration);
+      this.db
+        .prepare("INSERT INTO checkpoint_migrations (v) VALUES (?)")
+        .run(version);
+
+      if (stopAtVersion !== undefined && version >= stopAtVersion) {
+        break;
+      }
+      version += 1;
+    }
   }
 
   async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
@@ -127,6 +145,19 @@ CREATE TABLE IF NOT EXISTS writes (
         type,
         checkpoint,
         metadata,
+        (
+          SELECT json_group_object(channel, value) FROM (
+            SELECT
+              cb.channel,
+              jsonb_array(cb.type, CAST(cb.blob AS TEXT)) as value
+            FROM checkpoint_blobs as cb
+            JOIN json_each(jsonb(checkpoints.checkpoint) -> 'channel_versions') as cv
+            ON cb.channel = cv.key
+              AND cb.version = '1'
+            WHERE cb.thread_id = checkpoints.thread_id
+            AND cb.checkpoint_ns = checkpoints.checkpoint_ns
+          )
+        ) as channel_values,
         (
           SELECT
             json_group_array(
@@ -215,24 +246,46 @@ CREATE TABLE IF NOT EXISTS writes (
       pending_sends,
     } as Checkpoint;
 
-    return {
+    if (
+      !checkpoint.channel_values ||
+      Object.keys(checkpoint.channel_values).length === 0
+    ) {
+      checkpoint.channel_values = Object.fromEntries(
+        await Promise.all(
+          Object.entries(JSON.parse(row.channel_values)).map(
+            async ([channel, value]) => {
+              const [type, serializedValue] = value as [string, string];
+              return [
+                channel,
+                await this.serde.loadsTyped(type, serializedValue),
+              ];
+            }
+          )
+        )
+      );
+    }
+
+    const tuple: CheckpointTuple = {
       checkpoint,
       config: finalConfig,
       metadata: (await this.serde.loadsTyped(
         row.type ?? "json",
         row.metadata
       )) as CheckpointMetadata,
-      parentConfig: row.parent_checkpoint_id
-        ? {
-            configurable: {
-              thread_id: row.thread_id,
-              checkpoint_ns,
-              checkpoint_id: row.parent_checkpoint_id,
-            },
-          }
-        : undefined,
       pendingWrites,
     };
+
+    if (row.parent_checkpoint_id) {
+      tuple.parentConfig = {
+        configurable: {
+          thread_id: row.thread_id,
+          checkpoint_ns,
+          checkpoint_id: row.parent_checkpoint_id,
+        },
+      };
+    }
+
+    return tuple;
   }
 
   async *list(
@@ -252,6 +305,19 @@ CREATE TABLE IF NOT EXISTS writes (
         type,
         checkpoint,
         metadata,
+        (
+          SELECT json_group_object(channel, value) FROM (
+            SELECT
+              cb.channel,
+              jsonb_array(cb.type, CAST(cb.blob AS TEXT)) as value
+            FROM checkpoint_blobs as cb
+            JOIN json_each(jsonb(checkpoints.checkpoint) -> 'channel_versions') as cv
+            ON cb.channel = cv.key
+              AND cb.version = '1'
+            WHERE cb.thread_id = checkpoints.thread_id
+            AND cb.checkpoint_ns = checkpoints.checkpoint_ns
+          )
+        ) as channel_values,
         (
           SELECT
             json_group_array(
@@ -362,7 +428,26 @@ CREATE TABLE IF NOT EXISTS writes (
           pending_sends,
         } as Checkpoint;
 
-        yield {
+        if (
+          !checkpoint.channel_values ||
+          Object.keys(checkpoint.channel_values).length === 0
+        ) {
+          checkpoint.channel_values = Object.fromEntries(
+            await Promise.all(
+              Object.entries(JSON.parse(row.channel_values)).map(
+                async ([channel, value]) => {
+                  const [type, serializedValue] = value as [string, string];
+                  return [
+                    channel,
+                    await this.serde.loadsTyped(type, serializedValue),
+                  ];
+                }
+              )
+            )
+          );
+        }
+
+        const tuple: CheckpointTuple = {
           config: {
             configurable: {
               thread_id: row.thread_id,
@@ -375,25 +460,65 @@ CREATE TABLE IF NOT EXISTS writes (
             row.type ?? "json",
             row.metadata
           )) as CheckpointMetadata,
-          parentConfig: row.parent_checkpoint_id
-            ? {
-                configurable: {
-                  thread_id: row.thread_id,
-                  checkpoint_ns: row.checkpoint_ns,
-                  checkpoint_id: row.parent_checkpoint_id,
-                },
-              }
-            : undefined,
           pendingWrites,
         };
+
+        if (row.parent_checkpoint_id) {
+          tuple.parentConfig = {
+            configurable: {
+              thread_id: row.thread_id,
+              checkpoint_ns: row.checkpoint_ns,
+              checkpoint_id: row.parent_checkpoint_id,
+            },
+          };
+        }
+
+        yield tuple;
       }
+    }
+  }
+
+  private putCheckpointBlobs(
+    thread_id: string,
+    checkpoint_ns: string,
+    channel_values: Record<string, unknown>,
+    newVersions: ChannelVersions
+  ) {
+    const sql = `
+      INSERT OR REPLACE INTO
+        checkpoint_blobs (
+          thread_id,
+          checkpoint_ns,
+          channel,
+          version,
+          type,
+          blob
+        )
+      VALUES (?, ?, ?, ?, ?, ?)`;
+
+    const stmt = this.db.prepare(sql);
+
+    for (const [channel, version] of Object.entries(newVersions)) {
+      const [type, serializedValue] = this.serde.dumpsTyped(
+        channel_values[channel]
+      );
+
+      stmt.run(
+        thread_id,
+        checkpoint_ns,
+        channel,
+        version.toString(),
+        type,
+        serializedValue
+      );
     }
   }
 
   async put(
     config: RunnableConfig,
     checkpoint: Checkpoint,
-    metadata: CheckpointMetadata
+    metadata: CheckpointMetadata,
+    newVersions: ChannelVersions
   ): Promise<RunnableConfig> {
     this.setup();
 
@@ -407,6 +532,14 @@ CREATE TABLE IF NOT EXISTS writes (
 
     const preparedCheckpoint: Partial<Checkpoint> = copyCheckpoint(checkpoint);
     delete preparedCheckpoint.pending_sends;
+    delete preparedCheckpoint.channel_values;
+
+    this.putCheckpointBlobs(
+      config.configurable?.thread_id,
+      config.configurable?.checkpoint_ns,
+      checkpoint.channel_values ?? {},
+      newVersions
+    );
 
     const [type1, serializedCheckpoint] =
       this.serde.dumpsTyped(preparedCheckpoint);
@@ -428,7 +561,19 @@ CREATE TABLE IF NOT EXISTS writes (
 
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `
+        INSERT OR REPLACE INTO
+          checkpoints (
+            thread_id,
+            checkpoint_ns,
+            checkpoint_id,
+            parent_checkpoint_id,
+            type,
+            checkpoint,
+            metadata
+          )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `
       )
       .run(...row);
 
@@ -461,8 +606,16 @@ CREATE TABLE IF NOT EXISTS writes (
     }
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO writes 
-      (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value) 
+      INSERT OR REPLACE INTO writes (
+        thread_id,
+        checkpoint_ns,
+        checkpoint_id,
+        task_id,
+        idx,
+        channel,
+        type,
+        value
+      )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 

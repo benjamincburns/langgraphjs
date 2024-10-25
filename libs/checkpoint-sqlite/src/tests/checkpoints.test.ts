@@ -14,7 +14,7 @@ const checkpoint1: Checkpoint = {
     someKey1: "someValue1",
   },
   channel_versions: {
-    someKey2: 1,
+    someKey1: 1,
   },
   versions_seen: {
     someKey3: {
@@ -31,7 +31,7 @@ const checkpoint2: Checkpoint = {
     someKey1: "someValue2",
   },
   channel_versions: {
-    someKey2: 2,
+    someKey1: 2,
   },
   versions_seen: {
     someKey3: {
@@ -55,7 +55,8 @@ describe("SqliteSaver", () => {
     const runnableConfig = await sqliteSaver.put(
       { configurable: { thread_id: "1" } },
       checkpoint1,
-      { source: "update", step: -1, writes: null, parents: {} }
+      { source: "update", step: -1, writes: null, parents: {} },
+      checkpoint1.channel_versions
     );
     expect(runnableConfig).toEqual({
       configurable: {
@@ -108,7 +109,8 @@ describe("SqliteSaver", () => {
         step: -1,
         writes: null,
         parents: { "": checkpoint1.id },
-      }
+      },
+      checkpoint2.channel_versions
     );
 
     // verify that parentTs is set and retrieved correctly for second checkpoint
